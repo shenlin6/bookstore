@@ -11,9 +11,9 @@ type Token string
 
 // Page 分页
 type Page struct {
-	NextID        string `json:"next_id"`
-	NextTimeAtUTC int64  `json:"next_time_at_utc"`
-	PageSize      int64  `json:"page_size"`
+	NextID        string `json:"next_id"`          //cursor
+	NextTimeAtUTC int64  `json:"next_time_at_utc"` //记录分页发生的时间点
+	PageSize      int64  `json:"page_size"`        //每一页元素的个数
 }
 
 // Isvalid 判断解析的token是否有效的函数
