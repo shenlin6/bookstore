@@ -103,10 +103,10 @@ func (b *bookstore) DeleteShelf(ctx context.Context, id int64) error {
 	return b.db.WithContext(ctx).Delete(&Shelf{}, id).Error
 }
 
-// ListBooks 返回某个书架上的图书列表
-func (b *bookstore) ListBooks(ctx context.Context, id int64) ([]*Book, error) {
+// ListBooks 根据书架id查询图书
+func (b *bookstore) ListBooks(ctx context.Context, shelfid int64, pagesize int, cursor string) ([]*Book, error) {
 	var vl []*Book
-	err := b.db.WithContext(ctx).Where("ShelfID = ?", id).Find(&vl).Error
+	err := b.db.WithContext(ctx).Where("shelf_id = ? and id > ?", shelfid, cursor).Order("id ASC").Limit(pagesize).Find(&vl).Error
 	return vl, err
 }
 

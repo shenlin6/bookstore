@@ -1,20 +1,27 @@
 package main
 
+//基于游标的分页
 import (
 	"encoding/base64"
 	"encoding/json"
+	"time"
 )
 
-//基于游标的分页
-
 type Token string
-
 
 // Page 分页
 type Page struct {
 	NextID        string `json:"next_id"`
 	NextTimeAtUTC int64  `json:"next_time_at_utc"`
 	PageSize      int64  `json:"page_size"`
+}
+
+// Isvalid 判断解析的token是否有效的函数
+func (p Page) Isinvalid() bool {
+	return p.NextID == "" ||
+		p.NextTimeAtUTC == 0 ||
+		p.NextTimeAtUTC > time.Now().Unix() ||
+		p.PageSize <= 0
 }
 
 // Encode 返回分页token

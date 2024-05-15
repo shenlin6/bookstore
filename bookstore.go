@@ -6,11 +6,19 @@ import (
 	"bookstore/pb"
 	"context"
 	"fmt"
+	"log"
+	"strconv"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"gorm.io/gorm"
+)
+
+const (
+	defaultCursor   = "0" //默认游标
+	defaultPageSize = 2   //默认每页显示数量
 )
 
 type server struct {
@@ -64,6 +72,10 @@ func (s *server) CreateShelf(ctx context.Context, in *pb.CreateShelfRequest) (*p
 
 // GetShelf 获取书架
 func (s *server) GetShelf(ctx context.Context, in *pb.GetShelfRequest) (*pb.Shelf, error) {
+	//参数校验
+	if in.GetShelf() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "invalid shelf id")
+	}
 	//调用orm方法
 	data, err := s.bs.GetShelf(ctx, in.GetShelf())
 	if err != nil {
@@ -91,26 +103,78 @@ func (s *server) DeleteShelf(ctx context.Context, in *pb.DeleteShelfRequest) (*e
 
 // ListBooks 获取某个书架上的书籍列表
 func (s *server) ListBooks(ctx context.Context, in *pb.ListBooksRequest) (*pb.ListBooksResponse, error) {
+	//参数校验
+	if in.GetShelf() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "invalid shelf id")
+	}
+
+	var (
+		cursor   = defaultCursor
+		pageSize = defaultPageSize
+	)
+
+	pagetoken := in.GetPageToken()
+	// if pagetoken == "" {
+
+	// 	// 没有分页的话：默认为第一页
+
+	// } else {
+	//有分页的话：解析分页数据
+	if len(pagetoken) > 0 {
+		pageinfo := Token(in.GetPageToken()).Decode()
+		//再判断解析的token是否有效
+		if pageinfo.Isinvalid() { //如果无效
+			return nil, status.Error(codes.InvalidArgument, "invalid pagetoken")
+		}
+		cursor = pageinfo.NextID
+		pageSize = int(pageinfo.PageSize)
+	}
 	// 调用orm操作的方法
-	sl, err := s.bs.ListBooks(ctx, in.Shelf)
+	//基于游标实现分页
+	bl, err := s.bs.ListBooks(ctx, in.GetShelf(), pageSize+1, cursor) //技巧:多查一页，看是否有下一页
 	//如果切片为空
 	if err == gorm.ErrEmptySlice {
+		log.Printf("ListBooks failed,err:%v\n", err)
 		return &pb.ListBooksResponse{}, err
 	}
 	//如果查询数据库失败
 	if err != nil {
+		log.Printf("ListBooks failed,err:%v\n", err)
 		return nil, status.Error(codes.Internal, "query failed")
 	}
+
+	var (
+		hasNextPage   bool
+		nextPageToken string
+		realSize      = len(bl) //默认realsizs就是bl的长度，即默认没有下一条数据
+	)
+
+	//如果查询出来的结果比pagesize大，那么说明有下一页
+	if len(bl) > pageSize {
+		hasNextPage = true  //有下一条
+		realSize = pageSize //返回系统默认的一页数据
+	}
+
 	//封装返回数据
-	nsl := make([]*pb.Book, 0, len(sl))
-	for _, s := range sl {
+	nsl := make([]*pb.Book, 0, len(bl))
+	for i := 0; i < realSize; i++ {
 		nsl = append(nsl, &pb.Book{
-			Id:     s.ID,
-			Author: s.Author,
-			Title:  s.Titile,
+			Id:     bl[i].ID,
+			Author: bl[i].Author,
+			Title:  bl[i].Titile,
 		})
 	}
-	return &pb.ListBooksResponse{Books: nsl}, nil
+	//如果有下一页，就要生成下一页的pagetoken
+	if hasNextPage {
+		nextPageInfo := Page{
+			NextID:        strconv.FormatInt(nsl[realSize-1].Id, 10), //最后一个返回结果的id（从0开始算）
+			NextTimeAtUTC: time.Now().Unix(),
+			PageSize:      int64(pageSize),
+		}
+		nextPageToken = string(nextPageInfo.Encode())
+	}
+
+	return &pb.ListBooksResponse{Books: nsl, NextPageToken: nextPageToken}, nil
 }
 
 // CreateBook 创建书架上的书籍
@@ -121,8 +185,8 @@ func (s *server) CreateBook(ctx context.Context, in *pb.CreateBookRequest) (*pb.
 	}
 	//更新数据
 	data := Book{
-		Author: in.GetBook().GetAuthor(),
-		Titile: in.GetBook().GetTitle(),
+		Author:  in.GetBook().GetAuthor(),
+		Titile:  in.GetBook().GetTitle(),
 		ShelfID: in.GetShelf(),
 	}
 	//到数据库里操作
@@ -131,5 +195,5 @@ func (s *server) CreateBook(ctx context.Context, in *pb.CreateBookRequest) (*pb.
 		return nil, status.Error(codes.Internal, "create failed")
 	}
 	//返回更新操作
-	return &pb.Book{Id: nb.ID,Author: nb.Author, Title: nb.Titile}, nil
+	return &pb.Book{Id: nb.ID, Author: nb.Author, Title: nb.Titile}, nil
 }
